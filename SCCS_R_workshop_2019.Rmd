@@ -1,0 +1,1177 @@
+---
+title: "Data wrangling, visualization, and mapping in R"  
+
+subtitle: "Student Conference on Conservation Science, The University of Queensland"  
+
+date: "2019-07-10"  
+
+output: 
+  html_document:
+    toc: yes
+    toc_depth: 4
+    toc_float: yes
+editor_options:
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE)
+```
+
+## Introduction
+  
+***About.*** These notes were produced for a half-day course delivered by Brad Woodworth (b.woodworth@uq.edu.au) and Felipe Suárez Castro (a.suarezcastro@uq.edu.au) on 10-July-2019 for the 2019 Student Conference on Conservation Science at The University of Queensland. 
+
+Exercises and data used for this course are adapted from the excellent full-day course developed by C.J. Brown, D. Schoeman, A.J. Richardson, and B. Venables available at: http://www.seascapemodels.org/data/data-wrangling-spatial-course.html  
+
+***Course aims.*** The aim of this course is to provide training in data wrangling, visualization, and exploratory spatial mapping and analysis using [**R**](https://www.r-project.org/). The course focuses on a popular collection of packages that form the [*tidyverse*](https://www.tidyverse.org/) and follows the data science practices described in [***R** for Data Science*](https://r4ds.had.co.nz/index.html).  
+
+We’re aiming for a realistic experience, so today’s course will be based around a particular project that requires wrangling data, visualizing data, and creating maps.
+
+## Example case study
+
+### The situation
+
+You're in the midst of your PhD studying plankton ecology and are currently attending the International Plankton Symposium (IPS2020) where you run into your academic hero, Professor [Calanoid](https://en.wikipedia.org/wiki/Calanoida). Much to your delight, Prof Calanoid mentions that she’s read your first PhD paper on zooplankton biogeography and was impressed with the extent of **R** analysis in your paper. She goes on to suggest you collaborate on a promising new database she's working on.
+
+The database has extensive samples of copepod richness throughout Australia’s oceans and the Southern Ocean too. Prof Calanoid has a hypothesis - that like many organisms, copepod species richness (just the number of unique species) will be higher in warmer waters than cooler waters. 
+
+Your task is to explore the copepod dataset, check for and fix errors, match the copepod data to ocean temperature data, and produce some initial data summaries and maps to share with Prof. Calanoid, including an interactive map that Prof. Calanoid can use to communicate results of the copepod monitoring back to her funders.
+
+### Copepod data
+
+The spreadsheet `copepods-raw.csv` contains measurements of copepod species richness from around Australia. Copepods are a type of zooplankton, perhaps the most abundant complex animals on the planet and an important part of ocean food-webs. Prof Calanoid has also sent some other data, but has not explained what it is for yet. You’ll have to figure that out.
+
+Copepod species were counted using samples taken from a Continuous Plankton Recorder. The CPR was towed behind ‘ships of opportunity’ (including commercial and research vessels). ‘Silks’ run continuously through the CPR and the plankton are trapped onto the silks, kind of like a printer that runs all day and night to record plankton in the ocean.
+
+The data provided to you are modified from real data collected and processed from a program called [AusCPR](http://imos.org.au/facilities/shipsofopportunity/auscontinuousplanktonrecorder/).
+
+The aim is for this to be a realistic a learning experience, so be ready to face some errors in the data.
+
+## Set-up your R project
+
+1. Open RStudio and create a new project to house everything related to today's project: https://r4ds.had.co.nz/workflow-projects.html#rstudio-projects
+
+2. Add sub-folders for storing the copepod data, scripts, and any figures/maps generated.
+
+3. [Download data-for-course.zip](https://github.com/bkwoodworth/SCCS_R_workshop), unzip, and add the contents to your data sub-folder.
+
+4. Start a new **R** script (File > New File > R script) and save it in our scripts sub-folder. You might like to call your script copepod-wrangling.R. We always start our scripts with some comments that include a description of goals, our name and date. So do that too.
+
+5. In the console, execute the code below to install and load the `[tidyverse]` package collection for wrangling, tidying, and visualizing data. We will also need several other packages for spatial analyses and mapping so let's install those now too. This might take a couple of minutes.
+
+```{r install packages, eval = FALSE}
+
+### only need to install packages once
+
+##### data wrangling and plotting packages
+install.packages(pkgs = c('tidyverse', 'RColorBrewer'), 
+                 repos = "https://cloud.r-project.org", 
+                 dependencies = TRUE)
+
+##### spatial packages
+install.packages(pkgs = c('maps', 'raster', 'sf', 'maptools', 'mapproj', 'rgeos', 'leaflet'), 
+                 repos = "https://cloud.r-project.org", 
+                 dependencies = TRUE)
+
+```
+
+```{r load packages}
+
+### packages need to be loaded each time R is started
+library('tidyverse')
+
+```
+
+## Import data
+
+We will load in the data using a package from the `tidyverse` called `readr`. `readr` is handy because it does extra checks on data consistency over and above what the base **R** functions do. Dataframes or "tibbles" imported by `readr` also print in summary form by default. Let’s see how:
+
+```{r convert data to wide, eval = FALSE, include = FALSE }
+
+dat_input <- read_csv("data/copepods_raw.csv")
+
+dat_input %>% 
+  spread(key = region, value = richness_raw) %>% 
+  write_csv("data/copepods_raw_wide.csv")
+
+```
+
+```{r import copepods_raw }
+
+### read_csv comes from the readr package, but because readr is part of the tidyverse we need not load it separately
+# library(readr)
+
+### import data
+dat_input <- read_csv("data/copepods_raw.csv")
+
+### view data
+dat_input
+
+```
+
+What we immediately see is that the three rightmost 'variables' are different region names (or values), which means our dataset violates the tidy data structure ('Each variable has its own column'). We therefore need to reshape the data to make it more compatible with a majority (but not all) of **R** functions.
+
+### Reshape data with tidyr
+
+`tidyr` contains a number of functions that help with creating tidy data. To help with our situation, the function `gather` takes wide-format data and converts it to long format. We simply need to specify the variable name of the new variable indicating the region (`region`), the variable name for the copepod richness measurments (`richness_raw`), and the three colunns (East, Southern Ocean, and West) in the wide format data that will become values under the `region` variable in the long (tidy) data format.
+
+```{r reshape 1}
+
+# library(tidyr)
+
+dat_input <- 
+  gather(data = dat_input, 
+         key = region, value = richness_raw, East, `Southern Ocean`, West, 
+         na.rm = TRUE)
+
+dat_input
+
+```
+
+As you can see, after applying `gather` we the resulting dataframe has the same number of rows as in the original wide version of the data but the three region names are now stored as values in the `region` variable. 
+
+The `na.rm = TRUE` argument removed an empty cells (NA) that existed. There were empty cells because a given sampling location (`segment_no`) only occurred in one of the three regions.
+
+A common example of wide format data is species abundances data, where the different species names are often the variable (column) name and values stored in each cell are the abundances. 
+
+With our tidy data structure we can now proceed with error checking and exploratory data analyses.
+
+## Data wrangling and visualization
+
+Data wrangling encompasses the many steps the need to be undertaken to get your data into **R** and in a useful tidy form for visualisation and analysis. The modern quantitative scientist has to know a lot more about working with databases and data analysis than in the past. Often times getting data in the right form for analysis takes longer than the analysis itself! **R** and the `tidyverse` collection of packages provide a number of tools to make data wrangling easier and more repeatable. If you invest the time and effort into learning **R**, it will **definitely** pay off down the road.
+
+### Why data wrangle in **R**?
+
+Learning to wrangle your data in **R** is a wise decision because today **R** is the leading platform for environmental data analysis, with a diverse, supportive user community and an abundance of free online learning resources. **R** itself is also totally free. **R** is a powerful language for data wrangling and analysis because:
+
+  - It is relatively fast to process commands  
+    
+  - You can create repeatable scripts  
+    
+  - You can trace errors back to their source  
+    
+  - You can share your scripts with other people  
+    
+  - You can conveniently search large databases for errors  
+    
+  - Having your data in **R** allows seamless transition and access to a huge array of data visualization and cutting edge analysis tools.
+
+A core principle of science is repeatability. Creating and sharing your data scripts helps you to fulfill the important principle of repeatability. It makes you a better scientist and can also make you a more popular scientist: a well thought out script for a common wrangling or analysis problem may be widely used by others. Nowadays it is best practice (and oftem times required) to include your scripts with publications.
+
+Let’s get started with that copepod richness data. We've already imported and re-shaped our data into a [tidy format](https://r4ds.had.co.nz/tidy-data.html), so in this part of the course we are going to clean it up and do some exploratory analyses to get to know the new dataset and prepare it for analyses.
+
+### Visual error checking
+
+Let’s look at the first spreadsheet Prof Calanoid sent us. We don’t know the data well, and Prof Calanoid hasn’t told us much about it (or sent us any meta-data on what it all means), so we will want to do some thorough checks before we run any analyses to make sure we understand it well and avoid errors.
+
+Creating visuals of new data is a great way to get familiar with a new dataset and to check they are in good shape. 
+
+We will learn `ggplot2` for graphics in this course, which is part of the `tidyverse` and has some pretty powerful tools for creating both quick exploratory plots as well as publication quality figures. 
+
+RStudio’s [ggplot2 cheatsheet](https://github.com/rstudio/cheatsheets/raw/master/data-visualization-2.1.pdf) and [ggplot2 function reference page](https://ggplot2.tidyverse.org/reference/) are helpful resources for learning more about data visualization using `ggplot2`.
+
+First let's take a look at the spatial distribution of samples. Type this into the console:
+
+```{r check coordinates }
+
+ggplot(data = dat_input, 
+       mapping = aes(x = longitude, y = latitude)) +
+  geom_point()
+
+```
+  
+This plot simply shows the location of every segment. You can kind of see the CPR surveys wrapping around the coast of Australia.
+
+The function `ggplot()` creates a graph, rather than returning data like the other ‘normal’ functions. You can read the above line as: Take `dat_input`, create an `aes` (aesthetic) where the x-axis is `longitude` and the y-axis is `latitude`, and finally add (`+`) a points layer (`geom_point`).
+
+The ‘gg’ in `ggplot2` stands for [**G**rammar of **G**raphics](http://vita.had.co.nz/papers/layered-grammar.pdf). The intent of this package is to turn a sequence of functions into a readable sentence, which is why we separate two different functions (`ggplot()` and `geom_point()`) with a `+`. You can combine different functions into different sequences to create different types of graphics.
+
+Now, let’s plot lines instead of points. We will add a group command to make sure lines from different silks aren’t connected (try the below without the `group = silk_id` if you want to see what we mean).
+
+This plot just shows the location of every segment. You can kind of see the CPR surveys wrapping around the coast of Australia.
+
+```{r group silks }
+
+ggplot(data = dat_input, 
+       aes(x = longitude, y = latitude, group = silk_id)) +
+  geom_line()
+
+```
+
+We can also colour the silk IDs:
+
+```{r colour silks }
+
+ggplot(data = dat_input, 
+       aes(x = longitude, y = latitude, group = silk_id, color = factor(silk_id))) +
+  geom_line() +
+  theme(legend.position = "none")
+
+```
+
+We added a `theme` layer here to remove the legend. We did this because there are so many `silk` values that the legend ends up WAY bigger than the plot itself. We also wrapped factor around `silk_id` in the colour command, so that silk IDs (which are numbers) would be treated as discrete color levels, rather than a continuous measure. Once again, you can try the above with the factor to help your understanding.
+
+There are many arguments that can be provided to `theme` to customize your ggplot, including the font size and type, grid lines, background colours, etc. The [`ggplot2` reference guide](https://ggplot2.tidyverse.org/reference/#section-themes) lists all the possible ways the plot theme can be modified and even includes pre-compiled themes like `theme_bw` and `theme_dark` which we use later in the course. 
+
+So far so good, now let’s look at the richness data, our main variable for analysis
+
+### Checks on richness
+
+Let’s plot locations again, but this time colour points by copepod species richness:
+
+```{r checks on richness }
+
+ggplot(data = dat_input, 
+       aes(x = longitude, y = latitude, color = richness_raw)) +
+  geom_point()
+
+```
+
+Looks the same as before, but note the legend, which is now coloured by species richness. One of the smart things that `ggplot2` does is automatically scale axes based on the range of all the data we’ve plotted. This means our locations always fit nicely within the space of the map.
+
+The colours are also an ‘axis’, note that ggplot has them going to all the way to about -1000. This is a bit odd, and suggests that there are richness values that are close to -1000 (though we might not be able to see them under the other points). Obviously we can’t have negative species richness values, that makes no sense.
+
+Let’s try another plot of latitude versus richness to see if we can figure out what is going on.
+
+```{r check richness 2 }
+
+ggplot(dat_input, aes(x = latitude, y = richness_raw)) +
+  geom_point()
+
+```
+
+Ah, so most of the data are smallish (<100) positive values. But there are maybe three values near -1000. Glad we found those outliers before we ran any stats for Prof Calanoid. 
+
+### Correcting errors
+
+Let’s use logical comparisons to learn more about these outliers before we ask Prof Calanoid about them.
+
+Logical comparisons evaluate to `TRUE` or `FALSE`. Here is a list of several useful operators for conducting logical comparisons in **R**:
+
+  - `<` (less than) and `<=` (less than or equal to)  
+
+  - `>` (greater than) and `>=` (greater than or equal to)  
+  
+  - `==` (equal to) and `!=` (equal to)
+  
+  - `&` (AND) and `|` (OR)  and `!` (NOT)  
+  
+
+```{r correct errors 1, results = 'hide'}
+
+### This operation will return a TRUE or FALSE for every observation depending on if `richness_raw` is less than zero (TRUE) or not (FALSE) 
+dat_input$richness_raw < 0
+
+```
+
+Rather than print out every TRUE/FALSE individually, we can use `table` to count up the number of rows that have values less than (TRUE) or greater than (FALSE) zero.
+
+```{r correct errors 1b}
+
+table(dat_input$richness_raw < 0)
+
+```
+
+We can fold `dat_input$richness_raw < 0` back into a call to the data-frame to see what those rows are:
+
+```{r correct errors 2}
+
+filter(dat_input, richness_raw < 0 )
+
+```
+
+From this we can see that all negative values are -999. In some programs, this value indicates missing data. Let’s email Prof Calanoid and ask about them.
+
+Prof Calanoid fires an email straight back, apologising, and tells you that these are a hang-over from old software their assistant used and should actually be richness_raw = 0.
+
+So what we need to do now is change all the -999 to 0.
+
+Perhaps the most familiar way for to do this is to use a spreadsheet editor to fix the -999. But that is slow and tedious with large datasets and ***is not repeatable***.
+
+What we want to do is use **R** to identify the mistakes, then correct them and create a new data frame. So let’s use our logical indexing again:
+
+```{r correct errors 3}
+
+### new corrected dataframe
+dat <- dat_input
+
+### replace negative values with 0
+dat$richness_raw[dat$richness_raw < 0] <- 0
+
+```
+
+We copied dat_input to a new dataframe dat and corrected the -999 in dat.
+
+Let’s have a look at our graphs again:
+
+```{r correct errors 4}
+
+ggplot(data = dat, 
+       aes(x = longitude, y = latitude, color = richness_raw)) +
+  geom_point(size = 0.4)
+
+```
+
+Looks better (note the scale of the colour axis).
+
+You might want to use logical indexing to double check all the values are really positive. This command will ask if any value is <0:
+
+```{r correct errors 5, include = FALSE}
+
+any(dat$richness_raw < 0)
+
+```
+
+At this point we might want to save the ‘corrected’ data frame as an external file, then only work with that one in the future:
+
+```{r correct errors 6}
+
+write_csv(x = dat, path = "data/copepods-corrected.csv")
+
+```
+
+But we should still keep the code above we used to correct it. Why? If someone ever wants to repeat what we did, they can follow our code and correct the mistakes too. What would happen if it turns out the -999 were instead meant to be NA (missing data) rather than 0? Well a future analyst could easily see we used 0 instead of NA.
+
+Let’s do the latitude plot too. This is a really key plot for us, because we know that temperatures tend to get warmer at lower latitudes. So, if Prof Calanoid’s hypothesis is right, we would expect to see a decline in richness at higher latitudes:
+
+```{r correct errors 7 }
+
+ggplot(data = dat, 
+       aes(x = latitude, y = richness_raw)) +
+  geom_point()
+
+```
+
+Something looks odd with this graph (and the map too), because we expected a strong gradient in richness with latitude. Well, at least we have some results.
+
+### Saving ggplots 
+
+Let’s save this figure and email it to Prof Calanoid to get their opinion:
+
+```{r ggsave }
+
+### a convenient aspect of ggplot is that plots can be assigned to objects (cope_graph in this case) and used later...
+cope_graph <- 
+  ggplot(data = dat, aes(x = latitude, y = richness_raw)) +
+  geom_point()
+
+### ... like when it comes time to save the figure
+ggsave(plot = cope_graph, filename = "figs/richness-latitude.png",
+       width = 16, height = 10, units = "cm", dpi = 300)
+
+```
+
+`ggsave` is a function for saving plots generated by `ggplot`. Try `?ggsave` to see all the options for changing the figure size, resolution, or file type.
+
+### Introduction to dplyr
+
+`dplyr` and `tidyr` (as you already witness) are two incredibly useful packages for data wrangling. Both packages are part of the `tidyverse` so they play very nicely with `ggplot2` and `readr`.
+
+One of the nice things about `dplyr` is that the core code is written in C++ which means it runs a lot faster than many of the base **R** functions. You won’t notice much difference today, but you will if you ever work with very large data-sets.
+
+### Join different datasets with dplyr
+
+`dplyr` provides a useful set of functions for joining data frames by matching columns. Type `?inner_join` in your console and you will get a list of all the join types `dplyr` supports. 
+
+Today we will use `inner_join` to join `dat` to the `routes` data using columns with the same names to match by. It will keep all rows from `dat` where there are matching rows in routes, so if rows don’t match, they will be removed (use `left_join` if you want to keep rows in `dat` that don’t match too). `inner_join` will also duplicate rows if there are multiple matches so after joining two dataframes always check that the join worked as expected!
+
+So learning about joins has given Prof Calanoid time to write back to us about the figure we sent earlier. The results are junk as we suspected. Prof Calanoid has now explained that we need to standardize richness estimates, because silks from different routes have different sizes.
+
+Prof Calanoid had already provided the silk sizes in a file `Route-data.csv`, but neglected to tell us we needed to use this for a standardisation. No worries though, we can use our join skills to match the routes data and silk sizes to our richness data and then the standardization will be easy... right?
+
+```{r dplyr 1}
+
+### import route data
+routes <- read_csv("data/Route-data.csv")
+
+```
+
+Have a quick look at `routes` now to make sure you are happy with it. Then we will just use `inner_join` (making sure we check the number or rows stays the same):
+
+```{r join 1}
+
+# inner_join will 'guess' the variables by which to join the two datasets
+dat_std <- inner_join(x = dat, y = routes)
+
+# but safer practise is to explicitly state the join by variables 
+dat_std <- inner_join(x = dat, y = routes, by = c("project", "route", "meanlong", "region"))
+
+```
+
+```{r join 2}
+
+### number of rows before join
+nrow(dat)
+
+### number of rows after join
+nrow(dat_std)
+
+```
+
+Um, how come the number rows has increased after the join?
+
+#### Dangerous joins
+
+**Joins are a very important but very dangerous data wrangling operation!** You must always choose your join type carefully. For instance, `inner_join` vs `left_join` vs `full_join` will all give the same result for some datasets, but not others.
+
+Even after you think you know what you are doing, you still need to check the outcome. As we explained above, you can lose samples that don’t match, or duplicate samples that match multiple times. Small inconsistencies between the two datasets to be joined (e.g., if site names are lower case in one dataframe, but title case in the second dataframe) can spell trouble!
+
+We don’t say this to put you off joins, they are one of the most useful data wrangling tasks you can do in **R**, but just be careful and always carefully inspect the outcome.
+
+So let’s do a bit more of a thorough check of the routes data:
+
+```{r joins 3}
+
+nrow(routes)
+
+```
+
+```{r join 4}
+
+# how many different routes are there?
+length(unique(routes$route))
+
+```
+
+Oops. The `routes` data has duplicate entries. So let’s now check if duplicated `routes` have some matching data:
+
+```{r joins 5}
+
+### identify duplicated routes
+idup <- duplicated(routes$route)
+
+### extracted duplicated route names
+dup_routes <- routes$route[idup]
+
+### select rows where 'route' matches any of the route names listed in dup_routes (?'%in%')
+filter(routes, route %in% dup_routes)
+
+```
+
+Luckily the duplicated routes have the same values for all variables (e.g., `silk_area`); if they didn’t we’d have to go back to the data provider and find out which ones were correct. But since they are the same, we can just remove the duplicates. This is easy with a `dplyr` function `distinct()`, which selects distinct entries:
+
+```{r joins 6}
+
+routes2 <- distinct(routes)
+
+nrow(routes2)
+
+```
+
+Our `routes2` dataframe now consiss of 25 rows which is the same as the number of unique routes (`length(unique(routes$route))`). Great! Now try the join again, and do a few checks to make sure it worked as expected.
+
+```{r joins 7}
+
+dat_std <- inner_join(x = dat, y = routes2, by = c("project", "route", "meanlong", "region"))
+
+```
+
+```{r joins 8}
+
+### number of rows before join
+nrow(dat)
+
+### number of rows after join
+nrow(dat_std)
+
+```
+
+```{r joins 9}
+
+sum(dat$segment_no == dat_std$segment_no)
+
+```
+
+### Add new variables with `mutate`
+
+Once we have a matching `silk_area` value for each sample, it is easy to add a new variable that is standardised richness. To do this we use `mutate` which takes existing variables and calculates a new variable (or overwrites an existing one if we give it the same name). In addition to the standardised variables, we will also calculate the number of species per individual observed.
+
+```{r mutate 1}
+
+dat_std <-  
+  mutate(dat_std,
+         region = factor(region, levels = c("East", "West", "Southern Ocean")),
+         richness = richness_raw / silk_area)
+
+```
+
+We’ve also made `region` a factor, which means we get to choose the order of the levels. This will be handy later.
+
+Ok, let’s plot standardized richness so we can send a new graph to Prof Calanoid:
+
+```{r mutate 2}
+
+ggplot(data = dat_std, 
+       aes(x = latitude, y = richness)) +
+  geom_point()
+
+```
+
+Do you see a pattern now?
+
+We should also save the standardised data for use later:
+
+```{r mutate 3}
+
+write_csv(x = dat_std, path = "data/spatial-data/copepods_standardised.csv")
+
+```
+
+### Graphics with stats in ggplot2
+
+So our graph looks cleaner now, but what about adding a trend-line, so we can see if all the noise in Prof Calanoid’s data amounts to a real trend or not. Well one nice thing about `ggplot2` is that it can add many different types of trend lines for *quick visual assessment* without having to build a model:
+
+We can just add a ‘smooth’ like this:
+
+```{r ggplot stats 1}
+
+ggplot(dat_std, aes(x = latitude, y = richness, color = richness)) +
+  geom_point() +
+  geom_smooth() 
+
+```
+
+The little message informs us that the spline is cubic regression spline (‘cs’) made with ‘gam’ (generalized additive model).
+
+```{r ggplot stats 2}
+
+ggplot(dat_std, aes(x = latitude, y = richness, color = richness)) +
+  geom_point() +
+  geom_smooth()
+
+```
+
+We can also fit a linear model, but a linear relationship is clearly not a good fit to these data: 
+
+```{r ggplot stats 3}
+
+ggplot(dat_std, aes(x = latitude, y = richness, color = richness)) +
+  geom_point() +
+  geom_smooth(method = "lm") 
+
+```
+
+Important: this is good for visual checking, but doesn’t tell us much about how the model performed. To do that we need to go back to the basic **R** code for building that model. We won't do this today, but these additional steps can be found in the full course [full course](http://www.seascapemodels.org/data/data-wrangling-spatial-course.html).
+
+### Multipanel ggplots
+
+`ggplot2` isn’t limited to single panel plots. And that is just as well, because we have a sneaking suspicion that Prof Calanoid might have neglected to tell us something else about the data.
+
+You might have noticed the CPR data covers both the East and West Coast of Australia, and the Southern Ocean. Well it would be fair to say that different ocean basins might have slightly different latitudinal patterns of richness.
+
+So let’s investigate patterns by different oceans. You may have noticed that there is a `region` variable in the `routes` dataframe. Well that is joined into our standardized samples, so why don’t we start by just plotting the samples coloured by `region` to check it out:
+
+```{r facets 1}
+
+ggplot(dat_std, 
+       aes(x = longitude, y = latitude, group = region, color = region)) +
+  geom_point()
+
+```
+
+Looks like a good place to start. We could plot all the results, colouring by ocean basins like this:
+
+```{r facets 2}
+
+ggplot(dat_std, 
+       aes(x = latitude, y = richness, color = region, group = region)) +
+  geom_point(size = 0.1) +
+  geom_smooth() 
+
+```
+
+Notice that the use of `group = region` has meant that ggplot fits a smooth curve to each region too. Pretty handy, now we can see what looks like an interaction between latitude and East vs West. It also looks like the southern ocean pattern is a continuation of the West coast pattern. 
+
+By specifying `size = 0.1` we reduce the size of the points to make the trend stand out.
+
+These results are pretty exciting, but when we email this plot to Prof Calanoid she complains that the East and West data are too hard to tell apart.
+
+Since the plot is a bit busy, it might help Prof Calanoid see these stunning results if we ‘facet’ by region.
+
+```{r facets 4}
+
+# Here's a fun trick: by wrapping the entire ggplot call and object assignment in parentheses, we can both save the plot as an object (cope_smooth) and view the plot without having to re-type 'cope_smooth'
+
+(cope_smooth <- 
+   ggplot(dat_std, aes(x = latitude, y = richness, group = region, color = region)) +
+   geom_point(size = 0.1) +
+   geom_smooth() +
+   facet_grid(. ~ region) +
+   theme_bw())
+
+```
+
+`facet_grid` adds the facets. The `. ~ region` simply means add regions in columns versus nothing (.) in rows. If we replaced the `.` with another category, like `project` it would create a grid with rows and columns. Try it yourself.
+
+We wanted to compare the smooths across regions, so we’ve put regions all on one row this time. These plots are helpful because it allows for a quick and easy visual check for interactive effects. It is pretty clear now that we need to be cautious interpreting regional differences between the species richness * latitude relationship because there is no overlap in latitude between the Southern Ocean and the other two regions.
+
+The only other change we made was to add the `theme_bw` layer, which, most noticeably, changes the background colour from gray to white.
+
+Let's save our fancy new plot to share with Prof Calanoid, but this time save it as a .jpeg:
+
+```{r ggsave 2}
+
+ggsave(plot = cope_smooth, filename = "figs/richness-latitude-smooth.jpeg",
+       width = 16, height = 10, units = "cm", dpi = 300)
+
+```
+
+### Grouping and summarizing
+
+All the plots and pretty smooths are nice, but seeing the hard numbers can be useful too. Prof Calanoid is interested to see how richness changes according to the different survey routes.
+
+To do this we’re going to get into **grouping** with the `group_by` function followed by `summarize` to derive summary statistics for each group. 
+
+`group_by` adds a tag to the dataframe to indicate what variables to group the data by prior to calculating summary statistics (e.g., mean). 
+
+Let’s see the two functions in action.
+
+```{r dplyr summary 1}
+
+### how many rows in data_std
+nrow(dat_std)
+
+### how many different routes in dat_std
+n_distinct(dat_std$route)
+
+### group dat_std by route
+datg <- group_by(dat_std, route)
+
+```
+
+Look at `datg` to convince yourself that the data themselves have not changed, but if you type `datg` into the console it will print out `Groups: route [25]`, indicating the data is grouped by 25 routes.
+
+What we want to do is put `group_by` together with a summarize:
+
+```{r dplyr summary 3}
+
+(dat_std_sum <- 
+   summarize(datg,
+             mean_rich = mean(richness),
+             sd_rich = sd(richness),
+             n = n()))
+
+```
+
+And we get a nice summary table of means and standard deviations by routes. To understand the groups a bit better try the summarize on the ungrouped data.
+
+```{r dplyr summary 4, results = "hide"}
+
+summarize(dat_std, 
+          mean_rich = mean(richness),
+          sd_rich = sd(richness),
+          n = n())
+
+```
+
+### Piping
+
+To run multiple steps like those above we can use a handy feature called pipes. A pipe looks like this `%>%`. What it does is pipe the output of one function into the first argument of the next. For instance, these too lines of code do the same thing:
+
+```{r piping 1}
+
+### without pipe
+group_by(dat_std, route)
+
+### with pipe
+dat_std %>% group_by(., route)
+
+```
+
+The argument `dat_std` before the `%>%` just gets dropped in place of the `.`. Pipes are handy for chaining together multi-step operations on dataframes, like grouping, summarizing, and mutating. For most pipe-compatible functions, the `.` is not even needed, which makes our code even nicer to read. 
+
+Here we calculate the mean and standard deviation of `richness` for each `route`, as well as the number of rows (samples) `n()` for each `route`:
+
+```{r piping 2}
+
+dat_std_sum <- 
+  dat_std %>% 
+  group_by(route) %>%
+  summarize(mean_rich  = mean(richness),
+            sd_rich = sd(richness),
+            n = n())
+
+```
+
+The alternative to piping requires either many nested functions `()` or creating multiple intermediate and temporary objects, which gets harder and harder to read for long sequences of steps:
+
+```{r piping 3, eval = FALSE}
+
+dat_std_sum <- 
+  summarize(group_by(dat_std, route),
+            mean_rich = mean(richness),
+            sd_rich = sd(richness),
+            n = n())
+
+```
+
+Here we combine `group_by`, `mutate`, `summarize`, and `ggplot` using piping to plot the mean  (+/- standard error) species richness by route, where routes are sorted by latitude on the x-axis
+
+```{r piping 4}
+
+dat_std %>% 
+  group_by(route, meanlat, meanlong) %>%
+  summarize(mean_rich  = mean(richness),
+            sd_rich = sd(richness),
+            n = n(), 
+            se_rich = sd_rich / sqrt(n)) %>%
+  ungroup() %>%
+  mutate(route = fct_reorder(.f = route, .x = meanlat, .fun = max)) %>%
+  ggplot(aes(x = route, y = mean_rich)) +
+  geom_linerange(aes(ymin = mean_rich - se_rich, ymax = mean_rich + se_rich)) +
+  geom_point()
+
+
+```
+
+## Introduction to mapping and spatial analysis in **R**
+
+In the first section we tidied up Prof Calanoid’s and conducted some exploratory (mostly visual) analyses of the relationship between latitude and species richness. But the job isn’t done yet.
+
+Prof Calanoid’s actual hypothesis was about sea surface temperature and she also wanted to see some maps and for us to create an interactive map to share with funders.
+
+In this section of the course we will look at how to combine our copepod data with spatial layers for temperature and then create nice static and interactive maps.
+
+### A simple map of sample sites
+
+Let's read in the copepod richness data, and check it out.
+
+```{r spatial 1}
+
+cope <- read_csv("data/spatial-data/copepods_standardised.csv")
+
+cope
+
+```
+
+You should see four key variables here: the spatial coordinates for each tow (`longitude` and `latitude`), the "ship of opportunity" (`vessel`), and the mean richness of copepods observed in that grid cell (`richness`).
+
+We can make a quick map of our data using the `map` function in the `maps` package, and then add points for the longitude and latitude using `points`. Alternatively, we can also use the `sf` package to convert the world map data to a 'simple features' dataframe using `st_as_sf` and then map those data using the familiar `ggplot` and `geom_sf`. 
+
+```{r spatial 2}
+
+# load spatial packages
+library(sf)
+library(maps)
+library(maptools)
+library(rgeos)
+library(mapproj)
+
+### code for mapping using ggplot package
+# map(database = 'world')
+# points(cope$longitude, cope$latitude)
+
+### convert world map to a simple features suitable for ggplot
+world1 <- sf::st_as_sf(map(database = 'world', plot = FALSE, fill = TRUE))
+
+ggplot() +
+  geom_sf(data = world1) +
+  geom_point(data = cope, aes(x = longitude, y = latitude))
+
+```
+
+Note: we've used `ggplot()`, with nothing in the brackets. That is because we plotted multiple layers, each with a different data source, so we need to specify the data provided to each geom separately (`data = world1` for `geom_sf()` and `data = cope` for `geom_point`).
+
+This map looks ok, but we needn’t represent the entire world here. Let’s make a few modifications to our map. We can set x-limits and y-limits just like a normal plot. Also, let’s colour the land and ocean: good general guidance for making maps is to have the ocean white and land shaded if you are mapping sites in the ocean and vice-versa if you are mapping sites on land.
+
+```{r simple map 1}
+
+### longitudinal extent (x limits)
+range(cope$longitude)
+
+```
+
+```{r simple map 2}
+
+### latitudinal extent (y limits)
+range(cope$latitude)
+
+```
+
+```{r simple map 3}
+
+ggplot() +
+  geom_sf(data = world1) +
+  geom_point(data = cope, aes(x = longitude, y = latitude), col = "grey20") +
+  coord_sf(xlim = c(100, 180), ylim =  c(-67, -10)) +
+  labs(y = expression(paste("latitude (" ^o, "N)"))) +
+  theme_bw()
+
+### code for mapping using maps package
+# map(database = 'world',xlim = c(100, 160), ylim = c(-67, -10),
+#     col = 'grey', fill = T, border = NA)
+# points(cope$longitude, cope$latitude, cex = 0.5, col = 'grey20')
+# 
+# axis(2, las = 1, ylim = c(-65, -10), cex.axis = 0.7)
+# ylabel <- expression(paste("latitude (" ^o, "N)"))
+# text(85, -35, ylabel, xpd = NA, srt = 90, cex = 0.8)
+
+```
+
+The code for mapping using `ggplot` is very similar to the plots we produced earlier. For mapping, the key layers (or geoms) are `geom_sf`, which adds the world map `sf` dataframe to the figure, and `coord_sf`, which sets the longitude/latitude limits of the maps. `coord_sf` can also be used to change the projection of `sf` data (see `?coord_sf`).
+
+For the `maps` code, the command `axis(2, ...)` added a vertical axis (use axis(1) for an x-axis). We set the ylimits of the axis and also shrunk the labels slightly using `cex.axis = 0.7`. We created a ylabel using `expression` so we could create a degree symbol. Then we added that label to the existing plot using `text()` at the given coordinates of `x = 112` and `y = -35`. The command `srt=90` rotates the text 90 degrees and `xpd = NA` allows the text to be plotted outside of the axes window. Without the `xpd` command, only text that was inside the map would show up. Check out `?axis` if you want to make further modifications to this axis. 
+
+### Viewing raster data
+
+Our aim was to uncover the relationship between temperature and copepod richness. To do that we need some spatial data on temperature, so we can extract temperature at the sampling sites.
+
+We have provided you with two files `MeanAVHRRSST.gri` and `MeanAVHRRSST.grd` which contain gridded maps of annual mean sea surface temperature from the Hadley dataset. Gridded data, also known as raster data, can be read and manipulated with the `raster` package. Let's load that package now:
+
+```{r raster 1}
+
+library(raster)
+
+```
+
+We can then load and view the SST raster like this:
+
+```{r raster 2}
+
+rsst <- raster(x = 'data/spatial-data/MeanAVHRRSST')
+
+plot(rsst)
+
+```
+
+This creates a pretty decent first plot of the raster. However, note the colour scale isn’t that appropriate for temperatures - green where temperatures are high and red where they are low. Further, these default colours wouldn’t be that great if our audience was red-green colour blind.
+
+First up, let's re-create the above plot using `ggplot`. We need to turn the raster into a dataframe to do that:
+
+```{r raster 3}
+
+dat_grid <- 
+  data.frame(xyFromCell(rsst, 1:ncell(rsst)),
+             vals = rsst[]) %>%
+  as_tibble()
+
+```
+
+Then we can plot that dataframe (still a grid), using `ggplot`:
+
+```{r raster 4}
+
+ggplot() +
+  geom_sf(data = world1) +
+  geom_point(data = cope, aes(x = longitude, y = latitude)) +
+  coord_sf(xlim = c(100, 180), ylim =  c(-67, -10)) +
+  labs(y = expression(paste("latitude (" ^o, "N)"))) +
+  geom_tile(data = dat_grid, aes(x = x, y = y, fill = vals)) 
+
+```
+
+The `RColorBrewer` package provides a great catalogue of colour palettes. Install that package then type this:
+
+```{r load RColorBrewer, eval=FALSE, results='hide'}
+
+library(RColorBrewer)
+
+### bring up help file for brewer.pal
+?brewer.pal
+
+```
+
+If you click the link to [colorbrewer.org](http://colorbrewer2.org/#type=sequential&scheme=BuGn&n=3) you will be taken to an interactive web browser for choosing colour palettes.
+
+We can also access `RColorBrewer` directly through ggplot with `scale_fill_brewer` (for discrete colours) and `scale_fill_distiller` (for continuous colours):
+
+```{r raster 5}
+
+ggplot(data = dat_grid, aes(x = x, y = y, fill = vals)) +
+  geom_tile() +
+  scale_fill_distiller(type = "seq", palette = "RdPu",
+                        direction = 1) +
+  theme_dark()
+
+```  
+
+I think the sequential palettes are a good choice for temperatures. Sequential palettes like Reds are most appropriate when our data has a linear scale. You may also see some people use palettes like RdBu (red-blue). However, such palettes are diverging and would give the impression that there is a breakpoint at ~12 degrees, where the colours change from red to blue. In this case there is nothing special about 12 degrees temperatures, so a sequential palette is more appropriate.
+
+Finally, we might want to add the sample points back on:
+
+```{r raster 6}
+
+ggplot(data = dat_grid, aes(x = x, y = y, fill = vals)) +
+  geom_tile() +
+  scale_fill_distiller(type = "seq", palette = "RdPu",
+                       direction = 1) +
+  geom_point(data = cope, aes(x = longitude, y = latitude), fill = grey(0.5, 0.5), size = 0.5)+
+  theme_dark()
+
+```
+
+We need to be explicit about `fill = grey(0.5, 0.5)` in our call to `geom_point` here, because otherwise `ggplot` will try to use the values from the raster to fill, and will fail.
+
+### Changing the map projection
+
+`ggplot` can change map projections for us on the fly. For instance, to use an orthographic projection we can use `coord_map`. One trick here is that it can take a long time to transform projections for larger datasets.
+
+So we will simplify our raster first by aggregating it:
+
+```{r raster 7}
+
+rsst_blocky <- aggregate(rsst, 5)
+
+dat_block <- 
+  data.frame(xyFromCell(rsst_blocky,
+                        1:ncell(rsst_blocky)),
+             vals = rsst_blocky[]) %>%
+  as_tibble()
+
+```
+
+This will make our image a bit blockier, but will speed up image creation. If you have lots of time you can skip the aggregate. If your computer is slow, you might want to increase the 5 to a bigger number (like 20).
+
+Now the plot, we just add a projection feature:
+
+```{r raster 8}
+
+ggplot(data = dat_block, aes(x = x, y = y, fill = vals)) +
+  geom_tile() +
+  scale_fill_distiller(type = "seq", palette = "RdPu",
+                       direction = 1) +
+  geom_point(data = cope, aes(x = longitude, y = latitude), fill = grey(0.8, 0.5), size = 0.5) +
+  theme_dark() +
+  coord_map("ortho", orientation = c(-40, 135, 0))
+
+```  
+
+Oh dear, Tasmania has disappeared! How is that? Well, when we aggregated it aggregated Tassie right off the map. Prof Calanoid will be particularly annoyed about losing Tasmania, because she grew up there. So we will look at fixing this problem below.
+
+Another way to do this is to transform the underlying data. Then we can do the transform once and save the data. This will save time if we want to replot the same map over and over.
+
+We won't cover transforming projections here, except to say that for rasters you can transform the projection using `projectRaster()` and for point (or polygon, or line) data you will want to use `st_transform()` from the `sf` package.
+
+### Plotting shapefiles
+
+One way to fix the 'missing Tasmania issue' from above is to plot some land over the top of our raster. We will use the `sf` package to do that. `sf` is the new, powerful kid on the block when it comes to **R** spatial analysis. As we have already seen, the combination of `ggplot2` and `sf` allows us to make quick and nice maps using the familiar `ggplot` structure.
+
+In the past we used a similar package `sp`, and we sometimes still use it when `sf` doesn't play nicely with other packages. Eventually `sf` will replace `sp`, so we will focus on `sf` today.
+
+A good introduction to working with spatial data can be found in [Geocomputation with **R**](https://geocompr.robinlovelace.net/), which is free online.
+
+We already loaded the `sf` package, so we can use `st_read` straightaway to import the Australia and New Zealand map data into R:
+
+```{r plot shapefiles, eval=FALSE, include=FALSE}
+
+world1 %>% 
+  filter(ID %in% c("Australia", "New Zealand")) %>% 
+  st_crop(xmin = 80, xmax = 180, ymax = -10, ymin = -70) %>%
+  st_write(dsn = "data/spatial-data/Aus-NZ.shp")
+
+```
+
+```{r read polygon}
+
+aus <- st_read(dsn = "data/spatial-data", layer = "Aus-NZ")
+
+```
+
+We can then plot Australia and New Zealand using `ggplot` and `geom_sf` as we did with `world1` earlier:
+
+```{r plot polygon}
+
+ggplot() + geom_sf(data = aus) 
+
+```
+
+Adding our raster data is as simple as adding those layers from before:
+
+```{r plot polygon 2}
+
+ggplot() +
+  geom_tile(data = dat_block, aes(x = x, y = y, fill = vals)) +
+  scale_fill_distiller(type = "seq", palette = "RdPu",
+                       direction = 1) +
+  geom_point(data = cope, aes(x = longitude, y = latitude), fill = grey(0.8, 0.5), size = 0.5) +
+  geom_sf(data = aus)  +
+  theme_dark() 
+
+```
+
+If you try to re-project this with `coord_map` it will fail. That's because `sf` is new and not fully integrated with other packages yet. If you haven't updated `ggplot2` recently, you might not even have the `geom_sf` function. So update `ggplot2` if you need to by installing it again (`install.packages("ggplot2")`).
+
+### Extracting temperatures at the sampling sites
+
+We have overlaid our copepod sampling points on the map of temperature, now let's extract the temperature values at those sampling sites, so we can test Prof Calanoid's hypothesis about SST and species richness.
+
+First we need to compile a two-column matrix just of the longitudes and latitudes:
+
+```{r extract sst 1}
+
+pts <- cbind(cope$longitude, cope$latitude)
+
+```
+
+This matrix gives the coordinates for which we want to extract SST. Now we just use the extract function in the raster package to obtain SST at each site. We can assign the outcome of extract directly back into our dataframe for copepods too:
+
+```{r extract sst 2}
+
+cope$sst <- raster::extract(x = rsst, y = pts)
+
+cope
+
+```
+
+We just added the SST at each site to our copepod dataframe. We can do this because the `pts` matrix was made directly from cope, so the order of sampling sites is maintained.
+
+```{r extract sst 3, warning = FALSE}
+
+### SST vs. latitude
+ggplot(data = cope, 
+       aes(x = latitude, y = sst)) +
+  geom_point()
+
+```
+
+From this we can see a tight relationship between latitude and SST. Let's re-create the earlier plot of richness versus latitude, but this time with SST (the explanatory variable of interest) on the x-axis.
+
+```{r extract sst 4, warning=FALSE}
+
+(cope_sst_smooth <- 
+   ggplot(data = cope, aes(x = sst, y = richness, group = region, color = region)) +
+   geom_point(size = 0.1) +
+   geom_smooth() +
+   facet_grid(. ~ region) +
+   theme_bw())
+
+```
+
+### Create an interactive map
+
+You are almost there with meeting all of Prof Calanoid's requests. The process hasn't been quite as quick, or gone quite as smoothly as we might have expected, but there's only one step to go - the interactive map.
+
+We will create the interactive map using the `leaflet` package. You will need to be connected to the internet for this to work properly. First, let's load the `leaflet` package into this **R** session:
+
+```{r load leaflet}
+
+library(leaflet)
+
+```
+
+Leaflet makes use of a Javascript (this is the language that dynamic web pages tend to use) package for mapping. It builds maps of your data ontop a range of freely available map layers. Check out this guide to [Leaflet for **R**](https://rstudio.github.io/leaflet/) for more examples.
+
+To build a leaflet map, you layer it up in a series of steps with the pipes `%>%` we learned about earlier. Pipes basically connect a series of functions in a sentence like manner, you can think of a pipe as being like a `+` but for functions.
+
+### Data size and leaflet
+
+Leaflet uses javascript, so it is code that runs in a user's browser. This means anyone looking at the map on the web has to download all the data before they can render the map. So you should keep your spatial datasets small if you want to use leaflet - imagine your colleagues trying to download your 100mb spatial data layer on their mobile data plan.
+
+Many sophisticated web mapping applications, like Google Maps, use *server-side* code. These can render much larger data-sets because they are only transferring the data that is needed for a particular view. Creating these kinds of applications requires specialised expertise that we won't cover in this course.
+
+So what we need to do now is simplify our copepod data, before we turn it into a leaflet map. Let's summarize it on 1-degree grids like we did this morning.
+
+```{r leaflet 1}
+
+cope_gridded <- 
+  cope %>%
+  mutate(lat = round(latitude, digits = 0), 
+         lon = round(longitude, digits = 0)) %>%
+  group_by(lat, lon) %>%
+  summarize(richness = mean(richness), 
+            sst = mean(sst))
+
+```
+
+```{r leaflet 2}
+
+### size of original cope dataframe
+print(object.size(cope), units = "Kb")
+
+### size of gridded cope dataframe
+print(object.size(cope_gridded), units = "Kb")
+
+```
+
+### Get started with a map
+
+To make the map, we first specify the dataframe to use with `leaflet(cope)`, then add tiles for the base layer, and lastly, we add markers at the coordinates of our copepod sites:
+
+```{r leaflet 3}
+
+leaflet(cope_gridded) %>%
+  addTiles() %>%
+  addCircleMarkers(lng = ~lon, lat = ~lat, radius = 0.5)
+
+```
+
+If this code fails you will may need to update Rstudio.
+
+We can do a bit more with leaflet maps than this. One option is to change the tiles. See a full list of options here. We can also colour the markers by the species richness.
+
+To build a colour palette, we can use some utility functions provided in the `leaflet` package:
+
+```{r leaflet 4}
+
+copedomain <- range(cope_gridded$richness)
+
+oranges <- colorNumeric("YlOrRd", domain = copedomain)
+
+```
+
+`colorNumeric` creates a function that will generate a Yellow-Orange-Red palette from `RColorBrewer`. The domain argument ensures that our colour scale will grade from the minimum to maximum copepod richness.
+
+Now let's build up our leaflet map, but this time we will specify the fill colour of our circle markers to be set using `oranges`.
+
+We will also add a legend to tell us what shade of purple corresponds to which copepod richness.
+
+```{r leaflet 5}
+
+leaflet(cope_gridded) %>%
+  addProviderTiles("Esri.OceanBasemap") %>%
+  addCircleMarkers(lng = ~lon, lat = ~lat, radius = 3,
+                   color = 'grey80',
+                   weight = 1,
+                   fill = TRUE,
+                   fillOpacity = 0.7, fillColor = ~oranges(richness)) %>%
+  addLegend("topright", pal = oranges,
+            values = copedomain,
+            title = "Number of copepod species",
+            opacity = 1) 
+
+```
+
+And voila! We've produced an interactive map with Leaflet, which is sure to impress Prof Calanoid's funders!
+
+## Conclusion
+
+We hoped you enjoyed this course. We covered a lot of territory -- data import, re-shaping, visualization, and wrangling with the `tidyverse`, exploratory spatial analyses and mapping with `sf` and `raster`, and interactive mapping with `leaflet`. 
+
+You need to practice to build your **R** skills, so we encourage you to try and make **R** a part of your normal analysis and graphing workflows, even if it seems harder at first. Fortunately, with the abundance of freely available resources and diverse and growing user community, learning **R** has never been easier!
+
+### Getting help
+
+> *Writing code is 80% googling the answer* (unattributed)
+
+If you are going to be a succesful **R** user, then you need to get good at finding help to deal with bugs. The above aphorism is widely subscribed to by professional programmers. **R** is no exception. If you web search an issue, like ‘ggplot remove legend’ you will commonly get a pretty decent answer on [Stack Overflow](https://stackoverflow.com/) or a similar site. 
+
+If the answer doesn’t already exist online then sign up to Stack Overflow and ask it yourself (but spend a bit of time looking... no one wants to get tagged for duplicating an existing question!).
+
+Another good idea is to find a local support group. [**R** coding is an emotional experience](http://www.seascapemodels.org/rstats/2017/09/18/emotions-of-programming-rstats.html), frustration is a common one, but the elation of finding a solution can help us persist. Having other people to help, or even just listen to your frustrations is a huge help for your motivation to keep learning **R**.
+
+## R resources
+
+There are plenty of good books out there along with a many fantastic **free** web resources. Here are a few:
+
+**Data science and visualizations with `ggplot2`:**  
+  
+  - '[R for Data Science](https://r4ds.had.co.nz) for all things data science  
+  
+  - '[R Graphics Cookbook](http://www.cookbook-r.com/Graphs/) and [Fundamentals of Data Visualization](https://serialmentor.com/dataviz/) for visualizing data in R, plus articles on [how to combine multiple `ggplot` graphics](http://www.sthda.com/english/articles/24-ggpubr-publication-ready-plots/81-ggplot2-easy-way-to-mix-multiple-graphs-on-the-same-page/)  
+  
+  - [The R Graph Gallery](https://www.r-graph-gallery.com/) for a gallery of R graphics (with code) 
+
+**Geospatial analysis, visualization, and mapping:**  
+  
+  - '[Geocomputation with R](https://geocompr.robinlovelace.net/) and [RSpatial](https://www.rspatial.org/) for spatial data science, including tutorials on [simple features `sf` in R](https://r-spatial.github.io/sf/articles/sf1.html) and [mapping with `ggplot` and `sf`](https://www.r-spatial.org/r/2018/10/25/ggplot2-sf.html)  
+  
+  - '[Leaflet for R](https://rstudio.github.io/leaflet/) for creating interactive maps with Leaflet  
+  
+  - '[Colour advice for mapping](http://colorbrewer2.org/#type=diverging&scheme=RdYlBu&n=3)
+  
+**General:**  
+  
+  - 'If you want to learn new tricks, or stay up-to-date with the latest packages, the blog aggregator [R-Bloggers](https://www.r-bloggers.com/) has a non-step feed of R blogs from all over the world and all disciplines.  
+  
+  - 'Cheatsheets for ggplot2 and other packages and topics are available from [RStudio](https://www.rstudio.com/resources/cheatsheets/) and can also be found by Googling the R topic/package plus 'cheatsheet'. 
